@@ -34,16 +34,15 @@
       when: ansible_distribution == "Amazon"
 
     - name: Download Sample Data
-      ansible.builtin.unarchive:
-        src: https://github.com/unicorn-rentals-04/unicorn-trading/releases/download/v0.0.1/reporter.sql.dump.tgz
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/unicorn-rentals-04/unicorn-trading/refs/heads/main/deploy/resources/database/dump.sql
         dest: /var/tmp
-        remote_src: yes
         mode: 0777
 
     - name: Import sample data
       mysql_db:
         state: import
-        target: /var/tmp/reporter.sql.dump
+        target: /var/tmp/dump.sql
         name: "{{ ecomm_database_name }}"
         login_host: "{{ ecomm_database_host }}"
         login_user: "{{ ecomm_database_user }}"

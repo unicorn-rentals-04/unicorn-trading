@@ -1,24 +1,57 @@
 - hosts: all
   tasks:
+    - name: udpate
+      apt:
+        upgrade: yes
+        update_cache: yes
+
+- hosts: all
+  roles:
+    - geerlingguy.nodejs
+  tasks:
+    - name: Install git
+      ansible.builtin.package:
+        name: git
+        state: present
+
     - name: Create app dir
       ansible.builtin.file:
         path: /usr/local/ecomm_reporter
         state: directory
         mode: '0755'
 
-    - name: Download Frontend Binary
-      ansible.builtin.unarchive:
-        src: https://github.com/unicorn-rentals-04/unicorn-trading/releases/latest/download/ecomm-reporter-frontend-linux-amd64.tar.gz
-        dest: /usr/local/ecomm_reporter
-        remote_src: yes
-        mode: 0777
+    - name: Read-write git checkout from github
+      ansible.builtin.git:
+        repo: https://github.com/unicorn-rentals-04/unicorn-trading.git
+        dest: /usr/local/unicorn-trading
 
-    - name: Download Client App Frontend
-      ansible.builtin.unarchive:
-        src: https://github.com/unicorn-rentals-04/unicorn-trading/releases/latest/download/frontend-client.tgz
+    - name: Copy frontend files to ecomm_reporter
+      copy:
+        src: /usr/local/unicorn-trading/frontend
         dest: /usr/local/ecomm_reporter
         remote_src: yes
-        mode: 0777
+
+    - name: Write react env file
+      blockinfile:
+        path: /usr/local/ecomm_reporter/frontend/.env
+        create: true
+        state: present
+        block: |
+          REACT_APP_ECOMM_IP={{ ecomm_ip }}
+
+    - name: Install packages based on package.json.
+      community.general.npm:
+        path: /usr/local/ecomm_reporter/frontend
+
+    - name: Install serve
+      community.general.npm:
+        name: serve
+        global: true
+
+    - name: build production
+      ansible.builtin.shell: . /home/ubuntu/.profile && npm run build
+      args:
+          chdir: /usr/local/ecomm_reporter/frontend
 
     - name: Write Config file
       blockinfile:
@@ -37,6 +70,8 @@
           ECOMM_DATABASENAME={{ ecomm_database_name }}
           ECOMM_DATABASEUSER={{ ecomm_database_user }}
           ECOMM_DATABASEPASS={{ ecomm_database_pass }}
+          REACT_APP_ECOMM_IP={{ ecomm_ip }}
+          PORT=8080
 
     - name: Write systemd config file
       blockinfile:
@@ -52,8 +87,8 @@
           PIDFile=/var/run/ecomm_reporter-frontend.pid
           Restart=always
           KillSignal=SIGQUIT
-          WorkingDirectory=/usr/local/ecomm_reporter
-          ExecStart=/usr/local/ecomm_reporter/bin/ecomm-rpt-fe
+          WorkingDirectory=/usr/local/ecomm_reporter/frontend
+          ExecStart=serve -s build
 
           [Install]
           WantedBy=multi-user.target
@@ -61,5 +96,93 @@
     - name: Make sure a service unit is running
       ansible.builtin.systemd:
         name: ecomm_reporter_frontend.service
+        enabled: yes
+        state: started
+
+- hosts: all
+  vars:
+    go_version: "1.22.1"
+    go_checksum: "aab8e15785c997ae20f9c88422ee35d962c4562212bb0f879d052a35c8307c7f"
+  roles:
+    - geerlingguy.go
+  tasks:
+    - name: Create app dir
+      ansible.builtin.file:
+        path: /usr/local/ecomm_reporter
+        state: directory
+        mode: '0755'
+
+    - name: Read-write git checkout from github
+      ansible.builtin.git:
+        repo: https://github.com/unicorn-rentals-04/unicorn-trading.git
+        dest: /usr/local/unicorn-trading
+
+    - name: Copy backend files to ecomm_reporter
+      ansible.builtin.copy:
+        src: /usr/local/unicorn-trading/backend/
+        dest: /usr/local/ecomm_reporter/backend
+        remote_src: yes
+
+    - name: go init
+      ansible.builtin.shell: bash -l -c " go mod init ecomm_reporter"
+      args:
+        chdir: /usr/local/ecomm_reporter/backend
+      ignore_errors: yes
+
+    - name: go tidy
+      ansible.builtin.shell:  bash -l -c "go mod tidy"
+      args:
+        chdir: /usr/local/ecomm_reporter/backend
+
+    - name: build go binary
+      ansible.builtin.shell: bash -l -c "go build"
+      args:
+        chdir: /usr/local/ecomm_reporter/backend
+      environment:
+        CGO_ENABLED: 0
+        GOOS: linux
+        GOARCH: amd64
+
+    - name: Write Config file
+      blockinfile:
+        path: /etc/ecomm_reporter_backend.conf
+        create: true
+        state: present
+        owner: root
+        group: root
+        mode: 0600
+        block: |
+          ECOMM_AUTHTOKEN={{ ecomm_auth_token }}
+          ECOMM_APPBUILDPATH=/usr/local/ecomm_reporter/backend
+          ECOMM_REPORTERENDPOINT=http://{{ ecomm_reporter_endpoint }}:9999
+          ECOMM_DATABASEHOST={{ ecomm_database_host }}
+          ECOMM_DATABASEPORT={{ ecomm_database_port | default("3306") }}
+          ECOMM_DATABASENAME={{ ecomm_database_name }}
+          ECOMM_DATABASEUSER={{ ecomm_database_user }}
+          ECOMM_DATABASEPASS={{ ecomm_database_pass }}
+
+    - name: Write systemd config file
+      blockinfile:
+        path: /etc/systemd/system/ecomm_reporter_backend.service
+        create: true
+        state: present
+        block: |
+          [Unit]
+          Description=eCommerce Reporter Backend
+
+          [Service]
+          EnvironmentFile=/etc/ecomm_reporter_backend.conf
+          PIDFile=/var/run/ecomm_reporter-backend.pid
+          Restart=always
+          KillSignal=SIGQUIT
+          WorkingDirectory=/usr/local/ecomm_reporter/backend
+          ExecStart=/usr/local/ecomm_reporter/backend/ecomm_reporter
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Make sure a service unit is running
+      ansible.builtin.systemd:
+        name: ecomm_reporter_backend.service
         enabled: yes
         state: started

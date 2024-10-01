@@ -20,7 +20,9 @@ export function DevMode(): boolean {
 
 export function BuildAppUrl(path: string): string {
   const devServer = "http://127.0.0.1:8080"
-  return DevMode() ? `${devServer}${path}` : path
+  const ip = process.env.REACT_APP_ECOMM_IP
+  const prodServer = `http://${ip}:8081`
+  return DevMode() ? `${devServer}${path}` : `${prodServer}${path}`
 }
 
 export function Root() {

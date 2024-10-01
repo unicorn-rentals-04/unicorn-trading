@@ -73,7 +73,7 @@ ecomm-reporter: # Deployment
           run_on_dryrun: false
           args:
             dst: instance_tag
-            format: "appid={{ .name_suffix }}"
+            format: '{"appid" = "{{ .name_suffix }}"}'
         - helper: GenerateOutput
           lifecycle: [afterCreate]
           run_on_dryrun: false
@@ -95,15 +95,13 @@ ecomm-reporter: # Deployment
         - reporter-vpc
         - backend-ec2
       args:
-        ami_type: amazonlinux
         tags: !lookup /reporter-infra/outputs/instance_tag
         vpc_id: !lookup /reporter-vpc/outputs/vpc_id
         subnet: !lookup /reporter-vpc/outputs/subnet_id1
         instance_name: !lookup /reporter-infra/outputs/frontend_instance_name
-        instance_type: t2.micro
         instance_profile_arn: !lookup /reporter-infra/outputs/instance_profile
         security_group_arns: !lookup /reporter-infra/outputs/security_group
-        ports: "22,8080"
+        ports: "22,8080,8081"
     - name: backend-ec2
       description: Create a new Ubuntu AWS EC2 instance that will host the reporter application
       extension: EC2Instance
@@ -203,6 +201,10 @@ ecomm-reporter: # Deployment
             format: "http://{{ .inventory }}:8080"
       args:
         user: !lookup /frontend-ec2/outputs/username
+        galaxy:
+          roles:
+            - geerlingguy.nodejs
+            - geerlingguy.go
         private_key: instance.pem
         inventory: !lookup /frontend-ec2/outputs/ip
         playbook:
@@ -216,11 +218,13 @@ ecomm-reporter: # Deployment
           ecomm_auth_token: !lookupSecret /reporter-auth-details/outputs/auth_token
           lacework_access_token: !secret lacework.access_token
           ecomm_reporter_endpoint: !lookup /backend-ec2/outputs/private_ip
+          ecomm_ip: !lookup /frontend-ec2/outputs/ip
           ecomm_database_host: !lookup /reporter-rds/outputs/address
           ecomm_database_port: !lookup /reporter-rds/outputs/port
           ecomm_database_name: !secret ecomm.database_name
           ecomm_database_user: !lookupSecret /reporter-auth-details/outputs/db_user
           ecomm_database_pass: !lookupSecret /reporter-auth-details/outputs/db_pass
+
 
     - name: deploy-traffic-generation
       extension: Ansible

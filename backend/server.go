@@ -1,4 +1,4 @@
-package backend
+package main
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -24,6 +25,30 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql" // sql/database mysql driver
 )
+
+func main() {
+	startMode := os.Getenv("START_MODE")
+	if startMode == "REPORTER" {
+		bucketname := os.Getenv("ECOMM_BUCKET")
+		bucketregion := os.Getenv("ECOMM_STATICREGION")
+		bucketendpoint := os.Getenv("ECOMM_OBJECTSTORAGEENDPOINT")
+		StartReporter(bucketendpoint, bucketname, "", "", bucketregion)
+	} else {
+		reporterEndpoint := os.Getenv("ECOMM_REPORTERENDPOINT")
+		dbType := "mysql"
+		dbUserName := os.Getenv("ECOMM_DATABASEUSER")
+		dbPassword := os.Getenv("ECOMM_DATABASEPASS")
+		dbHost := os.Getenv("ECOMM_DATABASEHOST")
+		dbPort := os.Getenv("ECOMM_DATABASEPORT")
+		dbName := os.Getenv("ECOMM_DATABASENAME")
+		// username:password@tcp(127.0.0.1:3306)/jazzrecords
+		dbConnString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", dbUserName, dbPassword, dbHost, dbPort, dbName)
+		buildRoot := "/tmp/"
+		authtoken := os.Getenv("ECOMM_AUTHTOKEN")
+		StartFrontend(reporterEndpoint, dbType, dbConnString, buildRoot, authtoken)
+	}
+
+}
 
 func simpleTokenAuth(token string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -295,7 +320,7 @@ func StartFrontend(reporterEndpoint string, dbType string, dbConnString string, 
 		ctx.Redirect(http.StatusPermanentRedirect, "/")
 	})
 
-	if err := r.Run(); err != nil {
+	if err := r.Run(":8081"); err != nil {
 		log.Fatal(err)
 	}
 }

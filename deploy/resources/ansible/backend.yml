@@ -1,32 +1,51 @@
 - hosts: all
+  vars:
+    go_version: "1.22.1"
+    go_checksum: "aab8e15785c997ae20f9c88422ee35d962c4562212bb0f879d052a35c8307c7f"
+  roles:
+    - role: geerlingguy.go
   tasks:
+    - name: Install git
+      ansible.builtin.package:
+        name: git
+        state: present
+
     - name: Create app dir
       ansible.builtin.file:
         path: /usr/local/ecomm_reporter
         state: directory
         mode: '0755'
 
-    # - name: Download Backend Binary
-    #   ansible.builtin.unarchive:
-    #     src: https://github.com/unicorn-rentals-04/unicorn-trading/releases/latest/download/ecomm-reporter-backend-linux-amd64.tar.gz
-    #     dest: /usr/local/ecomm_reporter
-    #     remote_src: yes
-    #     mode: 0777
-
     - name: Read-write git checkout from github
       ansible.builtin.git:
         repo: https://github.com/unicorn-rentals-04/unicorn-trading.git
         dest: /usr/local/unicorn-trading
 
-    - name: Copy reporter file
-      copy:
-        src: /usr/local/unicorn-trading
-        dest: /usr/local/ecomm_reporter
+    - name: Copy backend files to ecomm_reporter
+      ansible.builtin.copy:
+        src: /usr/local/unicorn-trading/backend/
+        dest: /usr/local/ecomm_reporter/
+        remote_src: yes
+
+    - name: go init
+      ansible.builtin.shell: source ~/.bash_profile; go mod init ecomm_reporter
+      args:
+          chdir: /usr/local/ecomm_reporter/
+      ignore_errors: yes
+
+    - name: go tidy
+      ansible.builtin.shell: source ~/.bash_profile; go mod tidy
+      args:
+          chdir: /usr/local/ecomm_reporter/
 
     - name: build go binary
-      ansible.builtin.command: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o module-name
+      ansible.builtin.shell: source ~/.bash_profile; go build
       args:
-          chdir: /usr/local/ecomm_reporter
+          chdir: /usr/local/ecomm_reporter/
+      environment:
+        CGO_ENABLED: 0
+        GOOS: linux
+        GOARCH: amd64
 
     - name: Write Config file
       blockinfile:
@@ -40,6 +59,7 @@
           ECOMM_BUCKET={{ ecomm_reporter_bucket }}
           ECOMM_STATICREGION={{ ecomm_reporter_bucket_region }}
           ECOMM_OBJECTSTORAGEENDPOINT={{ ecomm_reporter_object_storage_endpoint }}
+          START_MODE=REPORTER
 
     - name: Write systemd config file
       blockinfile:
@@ -56,7 +76,7 @@
           Restart=always
           KillSignal=SIGQUIT
           WorkingDirectory=/usr/local/ecomm_reporter
-          ExecStart=/usr/local/ecomm_reporter/bin/ecomm-rpt-be
+          ExecStart=/usr/local/ecomm_reporter/ecomm_reporter
 
           [Install]
           WantedBy=multi-user.target
@@ -83,18 +103,16 @@
     - role: geerlingguy.mysql
       when: deploydb
   tasks:
+    - name: Copy a new "sudoers" file into place, after passing validation with visudo
+      ansible.builtin.copy:
+        src: /Users/gabe/code/unicorn-trading/deploy/resources/database/dump.sql
+        dest: /var/tmp/
+      when: deploydb
+
     - name: Download Sample Data
-      ansible.builtin.unarchive:
-        src: https://github.com/unicorn-rentals-04/unicorn-trading/releases/download/v0.0.1/reporter.sql.dump.tgz
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/unicorn-rentals-04/unicorn-trading/refs/heads/main/deploy/resources/database/dump.sql
         dest: /var/tmp
-        remote_src: yes
         mode: 0777
       when: deploydb
-    - name: Import sample data
-      mysql_db:
-        state: import
-        name: "{{ ecomm_database_name }}"
-        target: /var/tmp/reporter.sql.dump
-        login_user: "{{ ecomm_database_user }}"
-        login_password: "{{ ecomm_database_pass }}"
-      when: deploydb
+
