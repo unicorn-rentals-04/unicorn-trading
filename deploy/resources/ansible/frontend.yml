@@ -16,7 +16,7 @@
 
     - name: Create app dir
       ansible.builtin.file:
-        path: /usr/local/ecomm_reporter
+        path: /usr/local/unicorn_rentals
         state: directory
         mode: '0755'
 
@@ -25,15 +25,15 @@
         repo: https://github.com/unicorn-rentals-04/unicorn-trading.git
         dest: /usr/local/unicorn-trading
 
-    - name: Copy frontend files to ecomm_reporter
+    - name: Copy frontend files to unicorn_rentals
       copy:
         src: /usr/local/unicorn-trading/frontend
-        dest: /usr/local/ecomm_reporter
+        dest: /usr/local/unicorn_rentals
         remote_src: yes
 
     - name: Write react env file
       blockinfile:
-        path: /usr/local/ecomm_reporter/frontend/.env
+        path: /usr/local/unicorn_rentals/frontend/.env
         create: true
         state: present
         block: |
@@ -41,7 +41,7 @@
 
     - name: Install packages based on package.json.
       community.general.npm:
-        path: /usr/local/ecomm_reporter/frontend
+        path: /usr/local/unicorn_rentals/frontend
 
     - name: Install serve
       community.general.npm:
@@ -51,11 +51,11 @@
     - name: build production
       ansible.builtin.shell: . /home/ubuntu/.profile && npm run build
       args:
-          chdir: /usr/local/ecomm_reporter/frontend
+          chdir: /usr/local/unicorn_rentals/frontend
 
     - name: Write Config file
       blockinfile:
-        path: /etc/ecomm_reporter_frontend.conf
+        path: /etc/unicorn_rentals_frontend.conf
         create: true
         state: present
         owner: root
@@ -63,19 +63,20 @@
         mode: 0600
         block: |
           ECOMM_AUTHTOKEN={{ ecomm_auth_token }}
-          ECOMM_APPBUILDPATH=/usr/local/ecomm_reporter/frontend
-          ECOMM_REPORTERENDPOINT=http://{{ ecomm_reporter_endpoint }}:9999
+          ECOMM_APPBUILDPATH=/usr/local/unicorn_rentals/frontend
+          ECOMM_ENDPOINT=http://{{ ecomm_reporter_endpoint }}:9999
           ECOMM_DATABASEHOST={{ ecomm_database_host }}
           ECOMM_DATABASEPORT={{ ecomm_database_port | default("3306") }}
           ECOMM_DATABASENAME={{ ecomm_database_name }}
           ECOMM_DATABASEUSER={{ ecomm_database_user }}
           ECOMM_DATABASEPASS={{ ecomm_database_pass }}
           REACT_APP_ECOMM_IP={{ ecomm_ip }}
+          ECOMM_REPORTERENDPOINT=http://{{ ecomm_reporter_endpoint }}:9999
           PORT=8080
 
     - name: Write systemd config file
       blockinfile:
-        path: /etc/systemd/system/ecomm_reporter_frontend.service
+        path: /etc/systemd/system/unicorn_rentals_frontend.service
         create: true
         state: present
         block: |
@@ -83,11 +84,11 @@
           Description=eCommerce Reporter Frontend
 
           [Service]
-          EnvironmentFile=/etc/ecomm_reporter_frontend.conf
-          PIDFile=/var/run/ecomm_reporter-frontend.pid
+          EnvironmentFile=/etc/unicorn_rentals_frontend.conf
+          PIDFile=/var/run/unicorn_rentals-frontend.pid
           Restart=always
           KillSignal=SIGQUIT
-          WorkingDirectory=/usr/local/ecomm_reporter/frontend
+          WorkingDirectory=/usr/local/unicorn_rentals/frontend
           ExecStart=serve -s build
 
           [Install]
@@ -95,7 +96,7 @@
 
     - name: Make sure a service unit is running
       ansible.builtin.systemd:
-        name: ecomm_reporter_frontend.service
+        name: unicorn_rentals_frontend.service
         enabled: yes
         state: started
 
@@ -108,7 +109,7 @@
   tasks:
     - name: Create app dir
       ansible.builtin.file:
-        path: /usr/local/ecomm_reporter
+        path: /usr/local/unicorn_rentals
         state: directory
         mode: '0755'
 
@@ -117,27 +118,27 @@
         repo: https://github.com/unicorn-rentals-04/unicorn-trading.git
         dest: /usr/local/unicorn-trading
 
-    - name: Copy backend files to ecomm_reporter
+    - name: Copy backend files to unicorn_rentals
       ansible.builtin.copy:
         src: /usr/local/unicorn-trading/backend/
-        dest: /usr/local/ecomm_reporter/backend
+        dest: /usr/local/unicorn_rentals/backend
         remote_src: yes
 
     - name: go init
-      ansible.builtin.shell: bash -l -c " go mod init ecomm_reporter"
+      ansible.builtin.shell: bash -l -c " go mod init unicorn_rentals"
       args:
-        chdir: /usr/local/ecomm_reporter/backend
+        chdir: /usr/local/unicorn_rentals/backend
       ignore_errors: yes
 
     - name: go tidy
       ansible.builtin.shell:  bash -l -c "go mod tidy"
       args:
-        chdir: /usr/local/ecomm_reporter/backend
+        chdir: /usr/local/unicorn_rentals/backend
 
     - name: build go binary
       ansible.builtin.shell: bash -l -c "go build"
       args:
-        chdir: /usr/local/ecomm_reporter/backend
+        chdir: /usr/local/unicorn_rentals/backend
       environment:
         CGO_ENABLED: 0
         GOOS: linux
@@ -145,7 +146,7 @@
 
     - name: Write Config file
       blockinfile:
-        path: /etc/ecomm_reporter_backend.conf
+        path: /etc/unicorn_rentals_backend.conf
         create: true
         state: present
         owner: root
@@ -153,8 +154,8 @@
         mode: 0600
         block: |
           ECOMM_AUTHTOKEN={{ ecomm_auth_token }}
-          ECOMM_APPBUILDPATH=/usr/local/ecomm_reporter/backend
-          ECOMM_REPORTERENDPOINT=http://{{ ecomm_reporter_endpoint }}:9999
+          ECOMM_APPBUILDPATH=/usr/local/unicorn_rentals/backend
+          ECOMM_ENDPOINT=http://{{ ecomm_reporter_endpoint }}:9999
           ECOMM_DATABASEHOST={{ ecomm_database_host }}
           ECOMM_DATABASEPORT={{ ecomm_database_port | default("3306") }}
           ECOMM_DATABASENAME={{ ecomm_database_name }}
@@ -163,7 +164,7 @@
 
     - name: Write systemd config file
       blockinfile:
-        path: /etc/systemd/system/ecomm_reporter_backend.service
+        path: /etc/systemd/system/unicorn_rentals_backend.service
         create: true
         state: present
         block: |
@@ -171,18 +172,18 @@
           Description=eCommerce Reporter Backend
 
           [Service]
-          EnvironmentFile=/etc/ecomm_reporter_backend.conf
-          PIDFile=/var/run/ecomm_reporter-backend.pid
+          EnvironmentFile=/etc/unicorn_rentals_backend.conf
+          PIDFile=/var/run/unicorn_rentals-backend.pid
           Restart=always
           KillSignal=SIGQUIT
-          WorkingDirectory=/usr/local/ecomm_reporter/backend
-          ExecStart=/usr/local/ecomm_reporter/backend/ecomm_reporter
+          WorkingDirectory=/usr/local/unicorn_rentals/backend
+          ExecStart=/usr/local/unicorn_rentals/backend/unicorn_rentals
 
           [Install]
           WantedBy=multi-user.target
 
     - name: Make sure a service unit is running
       ansible.builtin.systemd:
-        name: ecomm_reporter_backend.service
+        name: unicorn_rentals_backend.service
         enabled: yes
         state: started

@@ -9,7 +9,7 @@ resource "random_string" "random" {
 }
 
 locals {
-  bucket_name = "rpt-bucket-${random_string.random.result}"
+  bucket_name = "unicorn-rentals-bucket-${random_string.random.result}"
 }
 
 resource "aws_s3_bucket" "bucket" {

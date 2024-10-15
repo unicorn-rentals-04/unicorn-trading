@@ -13,7 +13,7 @@ locals {
 }
 
 resource "aws_security_group" "reporter-all-intra-traffic" {
-  name   = "ecomm-reporter-internal-traffic_${local.name_suffix}"
+  name   = "ecomm_reporter_internal-traffic"
   vpc_id = var.vpc_id
 
   ingress {
@@ -25,8 +25,8 @@ resource "aws_security_group" "reporter-all-intra-traffic" {
 }
 
 # EC2 IAM role setup
-resource "aws_iam_policy" "reporter_ec2_policy" { // ec2 policy
-  name = "reporter_ec2_policy_${local.name_suffix}"
+resource "aws_iam_policy" "unicorn_rentals_policy" { // ec2 policy
+  name = "unicorn_rentals_policy"
   policy = jsonencode({
     "Version" : "2012-10-17",
     "Statement" : [
@@ -39,8 +39,8 @@ resource "aws_iam_policy" "reporter_ec2_policy" { // ec2 policy
   })
 }
 
-resource "aws_iam_role" "reporter_ec2_role" { // assume role
-  name = "reporter_ec2_role_${local.name_suffix}"
+resource "aws_iam_role" "unicorn_rentals_role" { // assume role
+  name = "unicorn_rentals_role"
   assume_role_policy = jsonencode({
     "Version" : "2012-10-17",
     "Statement" : [
@@ -55,15 +55,15 @@ resource "aws_iam_role" "reporter_ec2_role" { // assume role
   })
 }
 
-resource "aws_iam_policy_attachment" "reporter_ec2_role_attachment" {
-  name       = "reporter_ec2_role_attach_${local.name_suffix}"
-  roles      = [aws_iam_role.reporter_ec2_role.id]
-  policy_arn = aws_iam_policy.reporter_ec2_policy.id
+resource "aws_iam_policy_attachment" "unicorn_rentals_role_attachment" {
+  name       = "unicorn_rentals_role_attach"
+  roles      = [aws_iam_role.unicorn_rentals_role.id]
+  policy_arn = aws_iam_policy.unicorn_rentals_policy.id
 }
 
-resource "aws_iam_instance_profile" "reporter_ec2_instance_profile" {
-  name = "reporter_ec2_instance_profile_${local.name_suffix}"
-  role = aws_iam_role.reporter_ec2_role.id
+resource "aws_iam_instance_profile" "unicorn_rentals_instance_profile" {
+  name = "unicorn_rentals_instance_profile"
+  role = aws_iam_role.unicorn_rentals_role.id
 }
 
 output "security_group" {
@@ -71,7 +71,7 @@ output "security_group" {
 }
 
 output "instance_profile" {
-  value = aws_iam_instance_profile.reporter_ec2_instance_profile.id
+  value = aws_iam_instance_profile.unicorn_rentals_instance_profile.id
 }
 
 output "name_suffix" {

@@ -34,7 +34,7 @@ func main() {
 		bucketendpoint := os.Getenv("ECOMM_OBJECTSTORAGEENDPOINT")
 		StartReporter(bucketendpoint, bucketname, "", "", bucketregion)
 	} else {
-		reporterEndpoint := os.Getenv("ECOMM_REPORTERENDPOINT")
+		reporterEndpoint := os.Getenv("ECOMM_ENDPOINT")
 		dbType := "mysql"
 		dbUserName := os.Getenv("ECOMM_DATABASEUSER")
 		dbPassword := os.Getenv("ECOMM_DATABASEPASS")

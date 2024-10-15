@@ -12,9 +12,32 @@ ecomm-reporter: # Deployment
     - path: lacework.access_token
       prompt: true
     - path: ecomm.database_name
-      default: order
+      default: unicorn-rentals-horns
   steps:
-    - name: reporter-auth-details
+    - name: generate-ssh-key-pair
+      extension: Ansible
+      source:
+        location: "git+https://github.com/lacework-dev/detc-resources.git"
+        subdir: "util/ssh-keys/generate-key-pair/ansible"
+      tags: baston
+      lookup:
+      helpers:
+        - helper: FileToKv
+          lifecycle: [afterCreate]
+          args:
+            name: public_key
+            srcfile: id_rsa.pub
+        - helper: FileToKv
+          lifecycle: [afterCreate]
+          args:
+            name: private_key
+            srcfile: id_rsa
+      args:
+        playbook:
+          - generate.yml
+        inventory: localhost
+
+    - name: unicorn-auth-details
       description: Create an auth token for use in the frontend
       extension: Terraform
       tags: infrastructure
@@ -28,41 +51,41 @@ ecomm-reporter: # Deployment
           - db_user
           - db_pass
 
-    - name: reporter-vpc
+    - name: unicorn-rentals-vpc
       description: Create a new AWS Virtual Private Cloud (VPC) for the reporter app to reside in
       extension: VPC.AWS
       needs:
-        - reporter-auth-details
+        - unicorn-auth-details
       tags: infrastructure
       args:
-        name: reporter-vpc
+        name: unicorn-rentals-vpc
 
-    - name: reporter-rds
+    - name: unicorn-rentals-rds
       extension: RDS
       needs:
-        - reporter-vpc
+        - unicorn-rentals-vpc
       tags: infrastructure
       args:
-        vpc_id: !lookup /reporter-vpc/outputs/vpc_id
-        subnet1: !lookup /reporter-vpc/outputs/subnet_id1
-        subnet2: !lookup /reporter-vpc/outputs/subnet_id2
-        username: !lookupSecret /reporter-auth-details/outputs/db_user
-        password: !lookupSecret /reporter-auth-details/outputs/db_pass
+        vpc_id: !lookup /unicorn-rentals-vpc/outputs/vpc_id
+        subnet1: !lookup /unicorn-rentals-vpc/outputs/subnet_id1
+        subnet2: !lookup /unicorn-rentals-vpc/outputs/subnet_id2
+        username: !lookupSecret /unicorn-auth-details/outputs/db_user
+        password: !lookupSecret /unicorn-auth-details/outputs/db_pass
         name: !secret ecomm.database_name
         engine: "mysql"
 
-    - name: reporter-infra
+    - name: uncicorn-rentals-infra
       extension: Terraform
       source:
         location: "git+https://github.com/unicorn-rentals-04/unicorn-trading.git"
         subdir: deploy/resources/tf/aws/infra
       tags: infrastructure
       needs:
-        - reporter-vpc
+        - unicorn-rentals-vpc
       args:
         cloud: "AWS"
         tfvars:
-          vpc_id: !lookup /reporter-vpc/outputs/vpc_id
+          vpc_id: !lookup /unicorn-rentals-vpc/outputs/vpc_id
         outputs:
           - name_suffix
           - security_group
@@ -73,65 +96,283 @@ ecomm-reporter: # Deployment
           run_on_dryrun: false
           args:
             dst: instance_tag
-            format: '{"appid" = "{{ .name_suffix }}"}'
+            format: '{"appid" = "unicorn-rentals"}'
         - helper: GenerateOutput
           lifecycle: [afterCreate]
           run_on_dryrun: false
           args:
             dst: frontend_instance_name
-            format: "rpt-frontend-{{ .name_suffix }}"
+            format: "unicorn-rentals-frontend"
         - helper: GenerateOutput
           lifecycle: [afterCreate]
           run_on_dryrun: false
           args:
             dst: backend_instance_name
-            format: "rpt-backend-{{ .name_suffix }}"
+            format: "unicorn-rentals-backend"
+
+    - name: unicorn-trfk-vpc
+      description: Create a new AWS Virtual Private Cloud (VPC) for the reporter app to reside in
+      extension: VPC.AWS
+      needs:
+        - unicorn-auth-details
+      tags: infrastructure
+      args:
+        name: unicorn-trfk-vpc
+
+    - name: traffick-ec2
+      description: Create a new Ubuntu AWS EC2 instance as a 'bastion' host
+      extension: EC2Instance
+      tags: infrastructure
+      needs:
+        - unicorn-trfk-vpc
+        - deploy-frontend
+      args:
+        tags: '{"deployment" = "security", "environment" = "production", "type" = "compute"}'
+        vpc_id: !lookup /unicorn-trfk-vpc/outputs/vpc_id
+        subnet: !lookup /unicorn-trfk-vpc/outputs/subnet_id1
+        instance_name: "trfk"
+        ports: "22"
+    - name: deploy-traffic-generation
+      extension: Ansible
+      source:
+        location: "git+https://github.com/unicorn-rentals-04/unicorn-trading.git"
+        subdir: deploy/resources/ansible
+      needs:
+        - traffick-ec2
+      helpers:
+        - helper: ServiceAvailable
+          args:
+            max_wait: 60 # seconds
+            hostname: !lookup /traffick-ec2/outputs/ip
+            port: 22
+        - helper: WriteValue
+          run_on_dryrun: true
+          args:
+            raw_value: !lookupSecret /traffick-ec2/outputs/pem
+            dstfile: instance.pem
+            mode: 0600
+      args:
+        user: !lookup /traffick-ec2/outputs/username
+        private_key: instance.pem
+        inventory: !lookup /traffick-ec2/outputs/ip
+        playbook: traffic.yml
+        privilege_escalation:
+          become: true
+        extra_vars:
+          ecomm_reporter_url: !lookup /deploy-frontend/outputs/api_url
+          ecomm_database_host: !lookup /unicorn-rentals-rds/outputs/address
+          ecomm_database_port: !lookup /unicorn-rentals-rds/outputs/port
+          ecomm_database_name: !secret ecomm.database_name
+          ecomm_database_user: !lookupSecret /unicorn-auth-details/outputs/db_user
+          ecomm_database_pass: !lookupSecret /unicorn-auth-details/outputs/db_pass
+
+    - name: bastion-ec2
+      description: Create a new Ubuntu AWS EC2 instance as a 'bastion' host
+      extension: EC2Instance
+      tags: infrastructure
+      needs:
+        - unicorn-rentals-vpc
+        - uncicorn-rentals-infra
+      args:
+        tags: '{"deployment" = "security", "environment" = "production", "type" = "compute"}'
+        vpc_id: !lookup /unicorn-rentals-vpc/outputs/vpc_id
+        subnet: !lookup /unicorn-rentals-vpc/outputs/subnet_id1
+        instance_name: "bastion"
+        instance_profile_arn: !lookup /uncicorn-rentals-infra/outputs/instance_profile
+        security_group_arns: !lookup /uncicorn-rentals-infra/outputs/security_group
+        ports: "22"
+    - name: add-private-ssh-key-file-to-bastion
+      extension: Ansible
+      needs:
+        - bastion-ec2
+      source:
+        location: "git+https://github.com/lacework-dev/detc-resources.git"
+        subdir: "util/ssh-keys/add-ssh-private-key-file/ansible"
+      tags: ssh
+      lookup:
+      helpers:
+        - helper: ServiceAvailable
+          args:
+            max_wait: 60 # seconds
+            hostname: !lookup /bastion-ec2/outputs/ip
+            port: 22
+        - helper: WriteValue
+          args:
+            raw_value: !lookup /bastion-ec2/outputs/pem
+            dstfile: instance.pem
+            mode: 0600
+      args:
+        private_key: instance.pem
+        inventory: !lookup /bastion-ec2/outputs/ip
+        user: "ubuntu"
+        extra_vars:
+          add_private_key: !lookup /generate-ssh-key-pair/outputs/private_key
+          private_key_name: "id_bastion"
+        playbook:
+          - add_file.yml
+    - name: add-public-ssh-key-file-to-bastion
+      extension: Ansible
+      needs:
+        - bastion-ec2
+      source:
+        location: "git+https://github.com/lacework-dev/detc-resources.git"
+        subdir: "util/ssh-keys/add-ssh-pub-key-authorized-keys/ansible"
+      tags: ssh
+      lookup:
+      helpers:
+        - helper: ServiceAvailable
+          args:
+            max_wait: 60 # seconds
+            hostname: !lookup /bastion-ec2/outputs/ip
+            port: 22
+        - helper: WriteValue
+          args:
+            raw_value: !lookup /bastion-ec2/outputs/pem
+            dstfile: instance.pem
+            mode: 0600
+      args:
+        private_key: instance.pem
+        inventory: !lookup /bastion-ec2/outputs/ip
+        user: "ubuntu"
+        extra_vars:
+          add_pub_key: !lookup /generate-ssh-key-pair/outputs/public_key
+        playbook:
+          - add.yml
+
     - name: frontend-ec2
       description: Create a new Ubuntu AWS EC2 instance that will host the reporter application
       extension: EC2Instance
       tags: infrastructure
       needs:
-        - reporter-infra
-        - reporter-vpc
+        - uncicorn-rentals-infra
+        - unicorn-rentals-vpc
         - backend-ec2
       args:
-        tags: !lookup /reporter-infra/outputs/instance_tag
-        vpc_id: !lookup /reporter-vpc/outputs/vpc_id
-        subnet: !lookup /reporter-vpc/outputs/subnet_id1
-        instance_name: !lookup /reporter-infra/outputs/frontend_instance_name
-        instance_profile_arn: !lookup /reporter-infra/outputs/instance_profile
-        security_group_arns: !lookup /reporter-infra/outputs/security_group
+        tags: !lookup /uncicorn-rentals-infra/outputs/instance_tag
+        vpc_id: !lookup /unicorn-rentals-vpc/outputs/vpc_id
+        subnet: !lookup /unicorn-rentals-vpc/outputs/subnet_id1
+        instance_name: !lookup /uncicorn-rentals-infra/outputs/frontend_instance_name
+        instance_profile_arn: !lookup /uncicorn-rentals-infra/outputs/instance_profile
+        security_group_arns: !lookup /uncicorn-rentals-infra/outputs/security_group
         ports: "22,8080,8081"
+    - name: add-public-ssh-key-file-to-frontend-ec2
+      extension: Ansible
+      needs:
+        - frontend-ec2
+      source:
+        location: "git+https://github.com/lacework-dev/detc-resources.git"
+        subdir: "util/ssh-keys/add-ssh-pub-key-authorized-keys/ansible"
+      tags: ssh
+      lookup:
+      helpers:
+        - helper: ServiceAvailable
+          args:
+            max_wait: 60 # seconds
+            hostname: !lookup /frontend-ec2/outputs/ip
+            port: 22
+        - helper: WriteValue
+          args:
+            raw_value: !lookup /frontend-ec2/outputs/pem
+            dstfile: instance.pem
+            mode: 0600
+      args:
+        private_key: instance.pem
+        inventory: !lookup /frontend-ec2/outputs/ip
+        user: "ubuntu"
+        extra_vars:
+          add_pub_key: !lookup /generate-ssh-key-pair/outputs/public_key
+        playbook:
+          - add.yml
+
     - name: backend-ec2
       description: Create a new Ubuntu AWS EC2 instance that will host the reporter application
       extension: EC2Instance
       tags: infrastructure
       needs:
-        - reporter-infra
-        - reporter-vpc
+        - uncicorn-rentals-infra
+        - unicorn-rentals-vpc
       args:
         ami_type: amazonlinux
-        tags: !lookup /reporter-infra/outputs/instance_tag
-        vpc_id: !lookup /reporter-vpc/outputs/vpc_id
-        subnet: !lookup /reporter-vpc/outputs/subnet_id1
-        instance_name: !lookup /reporter-infra/outputs/backend_instance_name
+        tags: !lookup /uncicorn-rentals-infra/outputs/instance_tag
+        vpc_id: !lookup /unicorn-rentals-vpc/outputs/vpc_id
+        subnet: !lookup /unicorn-rentals-vpc/outputs/subnet_id1
+        instance_name: !lookup /uncicorn-rentals-infra/outputs/backend_instance_name
         instance_type: t2.small
-        instance_profile_arn: !lookup /reporter-infra/outputs/instance_profile
-        security_group_arns: !lookup /reporter-infra/outputs/security_group
+        instance_profile_arn: !lookup /uncicorn-rentals-infra/outputs/instance_profile
+        security_group_arns: !lookup /uncicorn-rentals-infra/outputs/security_group
         ports: "22"
+    - name: add-public-ssh-key-file-to-backend-ec2
+      extension: Ansible
+      needs:
+        - backend-ec2
+      source:
+        location: "git+https://github.com/lacework-dev/detc-resources.git"
+        subdir: "util/ssh-keys/add-ssh-pub-key-authorized-keys/ansible"
+      tags: ssh
+      lookup:
+      helpers:
+        - helper: ServiceAvailable
+          args:
+            max_wait: 60 # seconds
+            hostname: !lookup /backend-ec2/outputs/ip
+            port: 22
+        - helper: WriteValue
+          args:
+            raw_value: !lookup /backend-ec2/outputs/pem
+            dstfile: instance.pem
+            mode: 0600
+      args:
+        private_key: instance.pem
+        inventory: !lookup /backend-ec2/outputs/ip
+        user: "ec2-user"
+        extra_vars:
+          add_pub_key: !lookup /generate-ssh-key-pair/outputs/public_key
+        playbook:
+          - add.yml
 
-    - name: reporter-s3
+    - name: unicorn-rental-s3
       extension: Terraform
       source:
         location: "git+https://github.com/unicorn-rentals-04/unicorn-trading.git"
         subdir: deploy/resources/tf/aws/s3
       tags: infrastructure
       needs:
-        - reporter-vpc
+        - unicorn-rentals-vpc
       args:
         cloud: "AWS"
         outputs:
           - bucket
+
+    - name: deploy-bastion
+      extension: Ansible
+      source:
+        location: "git+https://github.com/unicorn-rentals-04/unicorn-trading.git"
+        subdir: deploy/resources/ansible
+      needs:
+        - bastion-ec2
+      helpers:
+        - helper: ServiceAvailable
+          args:
+            max_wait: 60 # seconds
+            hostname: !lookup /bastion-ec2/outputs/ip
+            port: 22
+        - helper: WriteValue
+          run_on_dryrun: true
+          args:
+            raw_value: !lookupSecret /bastion-ec2/outputs/pem
+            dstfile: instance.pem
+            mode: 0600
+      args:
+        user: !lookup /bastion-ec2/outputs/username
+        galaxy:
+          roles:
+            - geerlingguy.java
+        private_key: instance.pem
+        inventory: !lookup /bastion-ec2/outputs/ip
+        playbook:
+          - bastion.yml
+        privilege_escalation:
+          become: true
 
     - name: deploy-backend
       extension: Ansible
@@ -168,7 +409,7 @@ ecomm-reporter: # Deployment
         extra_vars:
           deploy_lacework: true
           lacework_access_token: !secret lacework.access_token
-          ecomm_reporter_bucket: !lookup /reporter-s3/outputs/bucket
+          ecomm_reporter_bucket: !lookup /unicorn-rental-s3/outputs/bucket
           ecomm_reporter_bucket_region: us-east-1
           ecomm_reporter_object_storage_endpoint: https://s3.amazonaws.com
           deploy_reporter_database: false
@@ -199,6 +440,12 @@ ecomm-reporter: # Deployment
           args:
             dst: app_url
             format: "http://{{ .inventory }}:8080"
+        - helper: GenerateOutput
+          lifecycle: [afterCreate]
+          run_on_dryrun: false
+          args:
+            dst: api_url
+            format: "http://{{ .inventory }}:8081"
       args:
         user: !lookup /frontend-ec2/outputs/username
         galaxy:
@@ -215,47 +462,12 @@ ecomm-reporter: # Deployment
           become: true
         extra_vars:
           deploy_lacework: true
-          ecomm_auth_token: !lookupSecret /reporter-auth-details/outputs/auth_token
+          ecomm_auth_token: !lookupSecret /unicorn-auth-details/outputs/auth_token
           lacework_access_token: !secret lacework.access_token
           ecomm_reporter_endpoint: !lookup /backend-ec2/outputs/private_ip
           ecomm_ip: !lookup /frontend-ec2/outputs/ip
-          ecomm_database_host: !lookup /reporter-rds/outputs/address
-          ecomm_database_port: !lookup /reporter-rds/outputs/port
+          ecomm_database_host: !lookup /unicorn-rentals-rds/outputs/address
+          ecomm_database_port: !lookup /unicorn-rentals-rds/outputs/port
           ecomm_database_name: !secret ecomm.database_name
-          ecomm_database_user: !lookupSecret /reporter-auth-details/outputs/db_user
-          ecomm_database_pass: !lookupSecret /reporter-auth-details/outputs/db_pass
-
-
-    - name: deploy-traffic-generation
-      extension: Ansible
-      source:
-        location: "git+https://github.com/unicorn-rentals-04/unicorn-trading.git"
-        subdir: deploy/resources/ansible
-      needs:
-        - deploy-frontend
-      helpers:
-        - helper: ServiceAvailable
-          args:
-            max_wait: 60 # seconds
-            hostname: !lookup /backend-ec2/outputs/ip
-            port: 22
-        - helper: WriteValue
-          run_on_dryrun: true
-          args:
-            raw_value: !lookupSecret /backend-ec2/outputs/pem
-            dstfile: instance.pem
-            mode: 0600
-      args:
-        user: !lookup /backend-ec2/outputs/username
-        private_key: instance.pem
-        inventory: !lookup /backend-ec2/outputs/ip
-        playbook: traffic.yml
-        privilege_escalation:
-          become: true
-        extra_vars:
-          ecomm_reporter_url: !lookup /deploy-frontend/outputs/app_url
-          ecomm_database_host: !lookup /reporter-rds/outputs/address
-          ecomm_database_port: !lookup /reporter-rds/outputs/port
-          ecomm_database_name: !secret ecomm.database_name
-          ecomm_database_user: !lookupSecret /reporter-auth-details/outputs/db_user
-          ecomm_database_pass: !lookupSecret /reporter-auth-details/outputs/db_pass
+          ecomm_database_user: !lookupSecret /unicorn-auth-details/outputs/db_user
+          ecomm_database_pass: !lookupSecret /unicorn-auth-details/outputs/db_pass
